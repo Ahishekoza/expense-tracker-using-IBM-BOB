@@ -1,12 +1,15 @@
 ---
+name: seed-user
 description: Create a single dummy user in the database
-allowed-tools: Read, Bash(python3:*)
+disable-model-invocation: true
 ---
 
 Read database/db.py to understand the users table 
 schema and the get_db() helper.
 
-Then write and run a Python script using Bash that:
+Then write and run a Python script using Bash from the
+expense-tracker project root (so `from database.db import get_db`
+resolves) that:
 
 1. Generates a realistic random Indian user using your 
    own knowledge of common Indian names across regions:
