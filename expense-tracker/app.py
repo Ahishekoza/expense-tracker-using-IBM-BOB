@@ -1,15 +1,30 @@
+import os
 import sqlite3
 
-from flask import Flask, redirect, render_template, request, url_for
-from werkzeug.security import generate_password_hash
+from flask import Flask, redirect, render_template, request, session, url_for
+from werkzeug.security import check_password_hash, generate_password_hash
 
 from database.db import get_db, init_db, seed_db
 
 app = Flask(__name__)
+# Set SECRET_KEY in the environment for any real deployment. The fallback is a
+# development-only value so the app runs locally; never rely on it in production.
+app.secret_key = os.environ.get("SECRET_KEY", "dev-only-insecure-key-change-me")
 
 with app.app_context():
     init_db()
     seed_db()
+
+
+AUTH_PAGE_ENDPOINTS = {"login", "register"}
+
+
+@app.before_request
+def redirect_logged_in_from_auth_pages():
+    # A signed-in user can never reach the sign-in or sign-up pages, even by
+    # typing the URL; they always land on their profile instead.
+    if request.endpoint in AUTH_PAGE_ENDPOINTS and session.get("user_id"):
+        return redirect(url_for("profile"))
 
 
 # ------------------------------------------------------------------ #
@@ -33,6 +48,8 @@ def register():
     name = request.form.get("name", "").strip()
     email = request.form.get("email", "").strip().lower()
     password = request.form.get("password", "")
+
+    
 
     def reject(message):
         # Re-render with the submitted name/email; the password is never echoed back.
@@ -67,9 +84,48 @@ def register():
     return redirect(url_for("login"))
 
 
-@app.route("/login")
+INVALID_LOGIN_ERROR = "Invalid email or password."
+
+
+@app.route("/login", methods=["GET", "POST"])
 def login():
-    return render_template("login.html")
+    if request.method == "GET":
+        return render_template("login.html")
+
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    def reject(message):
+        # Re-render with the submitted email; the password is never echoed back.
+        return render_template("login.html", error=message, email=email), 400
+
+    if not email or not password:
+        return reject("Please enter your email and password.")
+
+    conn = get_db()
+    try:
+        user = conn.execute(
+            "SELECT id, name, password_hash FROM users WHERE email = ?",
+            (email,),
+        ).fetchone()
+    finally:
+        conn.close()
+
+    # One generic message for unknown email and wrong password so the form
+    # does not reveal which emails are registered.
+    if user is None or not check_password_hash(user["password_hash"], password):
+        return reject(INVALID_LOGIN_ERROR)
+
+    session.clear()  # drop any pre-login session data (session fixation)
+    session["user_id"] = user["id"]
+    session["user_name"] = user["name"]
+    return redirect(url_for("profile"))
+
+
+@app.route("/logout")
+def logout():
+    session.clear()
+    return redirect(url_for("landing"))
 
 
 @app.route("/terms")
@@ -85,11 +141,6 @@ def privacy():
 # ------------------------------------------------------------------ #
 # Placeholder routes — students will implement these                  #
 # ------------------------------------------------------------------ #
-
-@app.route("/logout")
-def logout():
-    return "Logout — coming in Step 3"
-
 
 @app.route("/profile")
 def profile():
