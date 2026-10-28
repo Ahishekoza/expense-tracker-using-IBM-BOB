@@ -1,4 +1,7 @@
-from flask import Flask, render_template
+import sqlite3
+
+from flask import Flask, redirect, render_template, request, url_for
+from werkzeug.security import generate_password_hash
 
 from database.db import get_db, init_db, seed_db
 
@@ -18,9 +21,50 @@ def landing():
     return render_template("landing.html")
 
 
-@app.route("/register")
+MIN_PASSWORD_LENGTH = 8
+DUPLICATE_EMAIL_ERROR = "An account with this email already exists."
+
+
+@app.route("/register", methods=["GET", "POST"])
 def register():
-    return render_template("register.html")
+    if request.method == "GET":
+        return render_template("register.html")
+
+    name = request.form.get("name", "").strip()
+    email = request.form.get("email", "").strip().lower()
+    password = request.form.get("password", "")
+
+    def reject(message):
+        # Re-render with the submitted name/email; the password is never echoed back.
+        return render_template("register.html", error=message, name=name, email=email), 400
+
+    if not name:
+        return reject("Please enter your full name.")
+
+    local_part, at_sign, domain = email.partition("@")
+    if not (local_part and at_sign and domain):
+        return reject("Please enter a valid email address.")
+
+    if len(password) < MIN_PASSWORD_LENGTH:
+        return reject(f"Password must be at least {MIN_PASSWORD_LENGTH} characters.")
+
+    conn = get_db()
+    try:
+        if conn.execute("SELECT 1 FROM users WHERE email = ?", (email,)).fetchone():
+            return reject(DUPLICATE_EMAIL_ERROR)
+
+        conn.execute(
+            "INSERT INTO users (name, email, password_hash) VALUES (?, ?, ?)",
+            (name, email, generate_password_hash(password)),
+        )
+        conn.commit()
+    except sqlite3.IntegrityError:
+        # Another request inserted the same email between our SELECT and INSERT.
+        return reject(DUPLICATE_EMAIL_ERROR)
+    finally:
+        conn.close()
+
+    return redirect(url_for("login"))
 
 
 @app.route("/login")
